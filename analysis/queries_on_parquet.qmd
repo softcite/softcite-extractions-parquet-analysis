@@ -1,0 +1,23 @@
+---
+execute:
+  echo: true
+  warning: false
+title: "Descriptive analysis of softcite extractions"
+format: 
+  html:
+    self-contained: true
+    df-print: paged
+---
+
+```{r}
+# source("https://raw.githubusercontent.com/apache/arrow/master/r/R/install-arrow.R")
+# install_arrow()
+
+library(arrow)
+```
+```{r}
+full_extractions <- read_parquet('../data/mentions.parquet')
+full_papers <- read_parquet('../data/papers.parquet')
+full_software <- read_parquet('../data/software.parquet')
+```
+
