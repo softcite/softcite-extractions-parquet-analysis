@@ -2,6 +2,7 @@
 execute:
   echo: true
   warning: false
+  cache: true
 title: "Descriptive analysis of softcite extractions"
 format: 
   html:
@@ -15,9 +16,167 @@ format:
 
 library(arrow)
 ```
+
 ```{r}
-full_extractions <- read_parquet('../data/mentions.parquet')
-full_papers <- read_parquet('../data/papers.parquet')
-full_software <- read_parquet('../data/software.parquet')
+library(tidyverse)
+library(arrow)
+
+
+full_extractions <- open_dataset('../data/mentions.parquet')
+full_papers <- open_dataset('../data/papers.parquet')
+full_purpose <- open_dataset('../data/purpose_assessments.parquet')
+```
+
+```{r}
+glimpse(full_papers)
+```
+```{r}
+glimpse(full_extractions)
+```
+
+```{r}
+glimpse(full_purpose)
+```
+
+
+
+```{r}
+full_extractions |>
+  group_by(paper_id) |> 
+  summarize(mention_per_paper = n()) |>
+  arrange(desc(mention_per_paper)) |>
+  collect() |>
+#  system.time() |>
+  collect()
+```
+
+```{r}
+full_papers |>
+  group_by(year(published_date)) |>
+  write_dataset('../data/')
+```
+
+```{r}
+partioned_papers <- open_dataset('../data/papers_partioned/')
+
+partioned_papers
+```
+
+```{r}
+full_papers |>
+  mutate(year = year(published_date)) |>
+  filter(between(year, 1990, 2023)) |>
+  group_by(year) |>
+  summarize(papers_per_year = n()) |>
+  arrange(year) |>
+  collect() # |>
+  # system.time()
+```
+
+Ok, something that requires joining the tables.
+
+```{r}
+head(full_papers)
+```
+```{r}
+head(full_extractions)
+```
+How have shared mentions changed over time.
+
+A paper with at least one shared mention, either document or mention context.
+
+```{r}
+full_purpose |>
+  filter(certainty > 0.5) |>
+  filter(purpose == "used") |>
+  distinct(paper_id) |>
+  collect()
+```
+
+How many papers were assessed to use, create, share at least one piece of software?
+
+This can be done directly on the purpose assessment table, as it includes paper_id.  Here we only use the "document" context purpose assessments.
+
+```{r}
+full_purpose |>
+  filter(certainty > 0.5) |>
+  filter(scope == "document") |>
+  distinct(paper_id, purpose) |>
+  count(purpose) |>
+  collect()
+```
+
+Show count of papers by year which shared some code
+
+```{r}
+full_purpose |>
+  filter(certainty > 0.9) |>
+  collect()
+  # filter(purpose == "shared") |>
+  # compute() |>
+  # left_join(full_papers, by = "paper_id") |>
+  # mutate(year = year(published_date)) |>
+  # count(year) |>
+  # collect()
+```
+
+```{r}
+doi_year_codes |>
+  ggplot(aes(x = year)) +
+  geom_bar() + 
+  scale_y_log10()
+```
+
+How many papers mentioned BLAST at least once?
+
+```{r}
+zotero_doi <- full_extractions |>
+   filter(str_detect(software_normalized, regex("Zotero|Bibdesk|Paperpile|Endnote|Bibtex|Mendeley|Papers", ignore_case = T))) |>
+  collect()
+
+zotero_doi |>
+  distinct(paper_id, software_normalized) |>
+  left_join(full_papers, by = "paper_id") |>
+  collect()
+```
+
+```{r}
+zotero_doi_year |>
+  mutate(inc_zotero = case_when(
+                           normalizedForm |> str_detect(fixed("Zotero", ignore_case = T)) ~ "Zotero",
+                           normalizedForm |> str_detect(fixed("Bibdesk", ignore_case = T)) ~ "Bibdesk",
+                           normalizedForm |> str_detect(fixed("Paperpile", ignore_case = T)) ~ "Paperpile",
+                           normalizedForm |> str_detect(fixed("Endnote", ignore_case = T)) ~ "Endnote",
+                           normalizedForm |> str_detect(fixed("Bibtex", ignore_case = T)) ~ "Bibtex",
+                           normalizedForm |> str_detect(fixed("Mendeley", ignore_case = T)) ~ "Mendeley",
+                           normalizedForm |> str_detect(fixed("Papers", ignore_case = T)) ~ "Papers"
+                                 )) |>
+  filter(between(year, 1970, 2022)) |>
+  ggplot(aes(x = year)) +
+  geom_bar() + 
+  scale_y_log10() +
+  facet_wrap(vars(inc_zotero)) +
+  ggtitle("Comparison of reference manager mentions from ~28 million academic PDFs")
+```
+
+Should convert the mentions to a "proportion of papers" model.
+
+```{r}
+amulet_doi_year <- full_extractions |>
+  filter(str_detect(normalizedForm, regex("^Silver$", ignore_case = T))) |>
+  filter(any_used) |>
+  distinct(paperId, normalizedForm) |>
+  left_join(full_papers, by = join_by(paperId == uuid)) |>
+  collect()
+```
+
+```{r}
+amulet_doi_year |>
+  filter(between(year, 1970, 2022)) |>
+  ggplot(aes(x = year)) +
+  geom_bar() + 
+ # scale_y_log10() +
+ # facet_wrap(vars(inc_zotero)) +
+  ggtitle("Comparison of reference manager mentions from ~28 million academic PDFs")
 ```
 
