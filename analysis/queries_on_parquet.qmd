@@ -13,18 +13,44 @@ format:
 ```{r}
 # source("https://raw.githubusercontent.com/apache/arrow/master/r/R/install-arrow.R")
 # install_arrow()
-
+# install.packages("arrow")
 library(arrow)
+library(tidyverse)
 ```
 
 ```{r}
 library(tidyverse)
 library(arrow)
 
+#dataset <- "full_dataset"
+# dataset <- "p05_five_percent_random_subset"
+dataset <- "p01_one_percent_random_subset"
 
-full_extractions <- open_dataset('../data/mentions.parquet')
-full_papers <- open_dataset('../data/papers.parquet')
-full_purpose <- open_dataset('../data/purpose_assessments.parquet')
+
+dataset_path <- paste0("../data/softcite-extractions-oa-data/", dataset, "/")
+
+full_extractions <- open_dataset(paste0(dataset_path, 'mentions.pdf.parquet'))
+full_papers <- open_dataset(paste0(dataset_path, 'papers.parquet'))
+full_purpose <- open_dataset(paste0(dataset_path, 'purpose_assessments.pdf.parquet'))
+
+# full_extractions <- read_parquet(paste0(dataset_path, 'mentions.pdf.parquet'))
+# full_papers <- read_parquet(paste0(dataset_path, 'papers.parquet'))
+# full_purpose <- read_parquet(paste0(dataset_path, 'purpose_assessments.pdf.parquet'))
+
+```
+Attempt using duckdb.
+
+```{r}
+# # install.packages("duckdb")
+# library(duckdb)
+# 
+# con <- dbConnect(duckdb(), dbdir = "my-db.duckdb", read_only = FALSE)
+```
+
+```{sql}
+#| connection: con
+-- CREATE TABLE full_papers AS
+--    SELECT * FROM read_parquet('../data/papers.parquet');
 ```
 
 ```{r}
@@ -51,44 +77,39 @@ full_extractions |>
 ```
 
 ```{r}
-full_papers |>
-  group_by(year(published_date)) |>
-  write_dataset('../data/')
+# full_papers |>
+#   group_by(year(published_date)) |>
+#   write_dataset('../data/papers_partioned/')
 ```
 
 ```{r}
-partioned_papers <- open_dataset('../data/papers_partioned/')
-
-partioned_papers
+# partioned_papers <- open_dataset('../data/papers_partioned/')
+# 
+# partioned_papers
 ```
 
 ```{r}
 full_papers |>
-  mutate(year = year(published_date)) |>
-  filter(between(year, 1990, 2023)) |>
-  group_by(year) |>
+  filter(published_year >= 1990 & published_year <= 2023) |>
+  # filter(published_year >= 1990) |> # on own this works
+  # filter(published_year <= 2023) |> # on own this doesn't work.
+  group_by(published_year) |>
   summarize(papers_per_year = n()) |>
-  arrange(year) |>
-  collect() # |>
-  # system.time()
+  arrange(desc(published_year)) |>
+  compute() |>
+  collect() |>
+  ggplot(aes(x = published_year, y = papers_per_year)) +
+  geom_col()
 ```
 
-Ok, something that requires joining the tables.
-
-```{r}
-head(full_papers)
-```
-```{r}
-head(full_extractions)
-```
 How have shared mentions changed over time.
 
 A paper with at least one shared mention, either document or mention context.
 
 ```{r}
-full_purpose |>
-  filter(certainty > 0.5) |>
-  filter(purpose == "used") |>
+sharing_papers <- full_purpose |>
+  filter(certainty_score > 0.5) |>
+  filter(purpose == "shared") |>
   distinct(paper_id) |>
   collect()
 ```
@@ -99,7 +120,7 @@ This can be done directly on the purpose assessment table, as it includes paper_
 
 ```{r}
 full_purpose |>
-  filter(certainty > 0.5) |>
+  filter(certainty_score > 0.5) |>
   filter(scope == "document") |>
   distinct(paper_id, purpose) |>
   count(purpose) |>
@@ -110,14 +131,18 @@ Show count of papers by year which shared some code
 
 ```{r}
 full_purpose |>
-  filter(certainty > 0.9) |>
-  collect()
-  # filter(purpose == "shared") |>
-  # compute() |>
-  # left_join(full_papers, by = "paper_id") |>
-  # mutate(year = year(published_date)) |>
-  # count(year) |>
-  # collect()
+  filter(certainty_score > 0.9) |>
+  filter(scope == "document") |>
+  # papers with at least one purpose assessment
+  distinct(paper_id) |>
+  left_join(full_papers, by = "paper_id") |>
+  filter(published_year >= 1990 & published_year <= 2023) |>
+  group_by(published_year) |>
+  summarize(papers_per_year = n()) |>
+  arrange(desc(published_year)) |>
+  collect() |>
+  ggplot(aes(x = published_year, y = papers_per_year, group = )) +
+  geom_col()  
 ```
 
 ```{r}
@@ -130,12 +155,16 @@ doi_year_codes |>
 How many papers mentioned BLAST at least once?
 
 ```{r}
-zotero_doi <- full_extractions |>
-   filter(str_detect(software_normalized, regex("Zotero|Bibdesk|Paperpile|Endnote|Bibtex|Mendeley|Papers", ignore_case = T))) |>
-  collect()
+# zotero_doi <- full_extractions |>
+#    filter(str_detect(software_normalized, regex("Zotero|Bibdesk|Paperpile|Endnote|Bibtex|Mendeley|Papers", ignore_case = T))) |>
+#   collect()
+# 
+# zotero_doi |>
+#   distinct(paper_id, software_normalized) |>
+#   
 
-zotero_doi |>
-  distinct(paper_id, software_normalized) |>
+zotero_doi_year <- full_extractions |>
+   filter(str_detect(software_normalized, regex("AlphaFold", ignore_case = T))) |>
   left_join(full_papers, by = "paper_id") |>
   collect()
 ```
@@ -143,16 +172,16 @@ zotero_doi |>
 ```{r}
 zotero_doi_year |>
   mutate(inc_zotero = case_when(
-                           normalizedForm |> str_detect(fixed("Zotero", ignore_case = T)) ~ "Zotero",
-                           normalizedForm |> str_detect(fixed("Bibdesk", ignore_case = T)) ~ "Bibdesk",
-                           normalizedForm |> str_detect(fixed("Paperpile", ignore_case = T)) ~ "Paperpile",
-                           normalizedForm |> str_detect(fixed("Endnote", ignore_case = T)) ~ "Endnote",
-                           normalizedForm |> str_detect(fixed("Bibtex", ignore_case = T)) ~ "Bibtex",
-                           normalizedForm |> str_detect(fixed("Mendeley", ignore_case = T)) ~ "Mendeley",
-                           normalizedForm |> str_detect(fixed("Papers", ignore_case = T)) ~ "Papers"
+                           software_normalized |> str_detect(fixed("Zotero", ignore_case = T)) ~ "Zotero",
+                           software_normalized |> str_detect(fixed("Bibdesk", ignore_case = T)) ~ "Bibdesk",
+                           software_normalized |> str_detect(fixed("Paperpile", ignore_case = T)) ~ "Paperpile",
+                           software_normalized |> str_detect(fixed("Endnote", ignore_case = T)) ~ "Endnote",
+                           software_normalized |> str_detect(fixed("Bibtex", ignore_case = T)) ~ "Bibtex",
+                           software_normalized |> str_detect(fixed("Mendeley", ignore_case = T)) ~ "Mendeley",
+                           software_normalized |> str_detect(fixed("Papers", ignore_case = T)) ~ "Papers"
                                  )) |>
-  filter(between(year, 1970, 2022)) |>
-  ggplot(aes(x = year)) +
+  filter(between(published_year, 1970, 2022)) |>
+  ggplot(aes(x = published_year)) +
   geom_bar() + 
   scale_y_log10() +
   facet_wrap(vars(inc_zotero)) +
