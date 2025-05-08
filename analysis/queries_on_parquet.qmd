@@ -90,7 +90,8 @@ full_extractions |>
 
 ```{r}
 full_papers |>
-  filter(published_year >= 1990 & published_year <= 2023) |>
+  filter(between(published_year, 1990, 2023)) |>
+  # filter(published_year >= 1990 & published_year <= 2023) |> # doesn't work
   # filter(published_year >= 1990) |> # on own this works
   # filter(published_year <= 2023) |> # on own this doesn't work.
   group_by(published_year) |>
